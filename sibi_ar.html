@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SIBI AR Translator — AI Powered</title>
+  <meta name="description" content="Penerjemah Bahasa Isyarat SIBI real-time berbasis AI menggunakan MediaPipe Hands dan TensorFlow.js dengan efek AR."/>
+
+  <!-- External Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ── Reset & Tokens ──────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:       #050810;
+      --surface:  #0a0f1e;
+      --surface2: #0f1628;
+      --border:   #1a2840;
+      --border2:  #243550;
+      --accent:   #00e676;
+      --accent2:  #00b0ff;
+      --accent3:  #7c4dff;
+      --warn:     #ff6d00;
+      --error:    #f44336;
+      --text:     #c8d8ec;
+      --dim:      #445870;
+      --dim2:     #2a3d55;
+      --glow-g:   rgba(0, 230, 118, 0.35);
+      --glow-b:   rgba(0, 176, 255, 0.35);
+      --glow-p:   rgba(124, 77, 255, 0.35);
+
+      --font-mono: 'Space Mono', monospace;
+      --font-ui:   'Inter', sans-serif;
+      --font-hero: 'Syne', sans-serif;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      overflow: hidden;
+    }
+
+    /* ── App Layout ──────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      grid-template-rows: 56px 1fr 48px;
+      height: 100vh;
+    }
+
+    /* ── Header ──────────────────────────────────── */
+    #hdr {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(5, 8, 16, 0.96);
+      backdrop-filter: blur(12px);
+      z-index: 200;
+    }
+    .logo {
+      font-family: var(--font-hero);
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      text-shadow: 0 0 20px var(--glow-g);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-badge {
+      background: linear-gradient(135deg, var(--accent3), var(--accent2));
+      color: white;
+      font-size: 0.55rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      letter-spacing: 0.1em;
+      font-family: var(--font-mono);
+    }
+
+    /* Status bar */
+    #sbar { display: flex; gap: 20px; align-items: center; }
+    .st {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.6rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.1em;
+      color: var(--dim);
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--dim2);
+      transition: all 0.4s;
+      flex-shrink: 0;
+    }
+    .dot.ok  { background: var(--accent);  box-shadow: 0 0 8px var(--glow-g); }
+    .dot.b   { background: var(--accent2); box-shadow: 0 0 8px var(--glow-b); }
+    .dot.warn{ background: var(--warn);    box-shadow: 0 0 8px rgba(255,109,0,.5); }
+    .dot.err { background: var(--error);   box-shadow: 0 0 8px rgba(244,67,54,.5); }
+
+    /* ── Main Stage ──────────────────────────────── */
+    #zone {
+      position: relative;
+      overflow: hidden;
+      background: #020408;
+    }
+
+    /* Video feeds */
+    #webcam {
+      position: absolute;
+      width: 1px; height: 1px;
+      opacity: 0; pointer-events: none;
+    }
+    #maincam {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      opacity: 0.65;
+      transform: scaleX(-1);
+    }
+
+    /* AR Canvas overlay */
+    #ar-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Grid overlay */
+    .gbg {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(26,40,64,.12) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(26,40,64,.12) 1px, transparent 1px);
+      background-size: 48px 48px;
+      z-index: 1;
+    }
+
+    /* Corner markers */
+    .cn {
+      position: absolute;
+      width: 20px; height: 20px;
+      border-style: solid;
+      border-color: rgba(0, 230, 118, 0.5);
+      z-index: 5;
+    }
+    .cn.tl { top: 16px;    left: 16px;    border-width: 2px 0 0 2px; }
+    .cn.tr { top: 16px;    right: 16px;   border-width: 2px 2px 0 0; }
+    .cn.bl { bottom: 16px; left: 16px;    border-width: 0 0 2px 2px; }
+    .cn.br { bottom: 16px; right: 16px;   border-width: 0 2px 2px 0; }
+
+    /* Confidence ring */
+    #conf-ring {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    #gi {
+      padding: 6px 18px;
+      border: 1px solid var(--border);
+      background: rgba(10, 15, 30, 0.88);
+      backdrop-filter: blur(10px);
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+
+    /* ── Sidebar ─────────────────────────────────── */
+    #sb {
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .pnl {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .ptit {
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.18em;
+      color: var(--dim);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    /* Result textarea */
+    #text-result {
+      width: 100%;
+      height: 110px;
+      background: rgba(5, 8, 16, 0.7);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      line-height: 1.6;
+      padding: 12px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.3s;
+    }
+    #text-result:focus { border-color: var(--accent); }
+
+    /* Hold progress */
+    .plbl {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.58rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+      margin-top: 10px;
+      margin-bottom: 5px;
+    }
+    .ptr {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .pfl {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      border-radius: 2px;
+      transition: width 0.08s linear;
+      width: 0%;
+    }
+
+    /* Confidence display */
+    #conf-display {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.6rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+    }
+    .conf-bar-wrap {
+      flex: 1;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    #conf-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent3), var(--accent2));
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.1s;
+    }
+
+    /* Buttons */
+    .brow { display: flex; gap: 8px; margin-top: 12px; }
+    .btn {
+      flex: 1;
+      padding: 9px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      cursor: pointer;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(0, 230, 118, 0.05);
+    }
+    .btn.d { border-color: rgba(244,67,54,0.5); color: var(--error); }
+    .btn.d:hover { background: rgba(244,67,54,0.07); border-color: var(--error); }
+
+    /* ── Model Status Panel ───────────────────────── */
+    #model-panel {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #model-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+    }
+    #model-status.loaded { color: var(--accent); }
+    #model-status.loading { color: var(--accent2); }
+    #model-status.error { color: var(--error); }
+
+    /* ── Alphabet Guide ───────────────────────────── */
+    #guides {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+    }
+    #guides::-webkit-scrollbar { width: 3px; }
+    #guides::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .g-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .g-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 4px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: default;
+      transition: all 0.2s;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .g-cell.active {
+      border-color: var(--accent);
+      background: rgba(0, 230, 118, 0.12);
+      box-shadow: 0 0 12px rgba(0, 230, 118, 0.2), inset 0 0 12px rgba(0, 230, 118, 0.05);
+      transform: scale(1.05);
+    }
+    .g-char {
+      font-family: var(--font-hero);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+    .g-cell.active .g-char { color: var(--accent); }
+    .g-scan {
+      font-size: 0.45rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+      margin-top: 2px;
+    }
+
+    /* ── Footer ──────────────────────────────────── */
+    #ftr {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-top: 1px solid var(--border);
+      background: rgba(5, 8, 16, 0.96);
+      font-size: 0.55rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+      letter-spacing: 0.08em;
+    }
+    #fps-display { color: var(--accent2); }
+
+    /* ── Loading Screen ──────────────────────────── */
+    #load {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      gap: 20px;
+      transition: opacity 0.8s;
+    }
+    #load.hidden { opacity: 0; pointer-events: none; }
+    .ltit {
+      font-family: var(--font-hero);
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: 0.15em;
+      text-shadow: 0 0 40px var(--glow-g);
+    }
+    .lsub {
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+      letter-spacing: 0.12em;
+    }
+    .lbw {
+      width: 240px;
+      height: 2px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .lbar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      width: 0%;
+      transition: width 0.4s;
+      box-shadow: 0 0 10px var(--glow-g);
+    }
+    #lmsg {
+      font-size: 0.6rem;
+      font-family: var(--font-mono);
+      color: var(--dim);
+      letter-spacing: 0.1em;
+    }
+    .l-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .l-step {
+      font-size: 0.58rem;
+      font-family: var(--font-mono);
+      color: var(--dim2);
+      letter-spacing: 0.08em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: color 0.3s;
+    }
+    .l-step.done { color: var(--accent); }
+    .l-step.active { color: var(--accent2); }
+    .l-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--dim2);
+      flex-shrink: 0;
+      transition: all 0.3s;
+    }
+    .l-step.done .l-dot { background: var(--accent); box-shadow: 0 0 6px var(--glow-g); }
+    .l-step.active .l-dot { background: var(--accent2); box-shadow: 0 0 6px var(--glow-b); animation: pulse 1s infinite; }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+    @keyframes glow-pulse { 0%,100%{text-shadow:0 0 30px var(--glow-g)} 50%{text-shadow:0 0 60px var(--glow-g), 0 0 100px rgba(0,230,118,0.2)} }
+
+    /* ── AR Text Glow Anim ───────────────────────── */
+    .ar-letter-anim { animation: glow-pulse 2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="load">
+  <div class="ltit">SIBI AR</div>
+  <div class="lsub">PENERJEMAH BAHASA ISYARAT INDONESIA · AI POWERED</div>
+  <div class="lbw"><div class="lbar" id="lbar"></div></div>
+  <div id="lmsg">Memulai sistem...</div>
+  <div class="l-steps">
+    <div class="l-step" id="ls1"><div class="l-dot"></div>Memuat MediaPipe Hands</div>
+    <div class="l-step" id="ls2"><div class="l-dot"></div>Mengakses kamera</div>
+    <div class="l-step" id="ls3"><div class="l-dot"></div>Memuat model AI (TensorFlow.js)</div>
+    <div class="l-step" id="ls4"><div class="l-dot"></div>Menginisialisasi AR overlay</div>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="app">
+  <!-- Header -->
+  <header id="hdr">
+    <div class="logo">
+      SIBI<span style="color:var(--dim)">AR</span>
+      <span class="logo-badge">AI · TFJS</span>
+    </div>
+    <div id="sbar">
+      <div class="st"><div class="dot" id="dcam"></div><span id="lcam">KAMERA</span></div>
+      <div class="st"><div class="dot" id="dmodel"></div><span id="lmodel">MODEL</span></div>
+      <div class="st"><div class="dot" id="dhand"></div><span id="lhand">TANGAN</span></div>
+      <div class="st"><div class="dot" id="drec"></div><span id="lrec">IDLE</span></div>
+    </div>
+  </header>
+
+  <!-- Camera Zone -->
+  <div id="zone">
+    <video id="webcam" autoplay playsinline muted></video>
+    <video id="maincam" autoplay playsinline muted></video>
+    <div class="gbg"></div>
+    <canvas id="ar-canvas"></canvas>
+
+    <!-- Corner markers -->
+    <div class="cn tl"></div><div class="cn tr"></div>
+    <div class="cn bl"></div><div class="cn br"></div>
+
+    <!-- Status label -->
+    <div id="conf-ring">
+      <div id="gi">👁 MENUNGGU SISTEM</div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside id="sb">
+    <!-- Result Box -->
+    <div class="pnl">
+      <div class="ptit">Hasil Terjemahan</div>
+      <textarea id="text-result" placeholder="Teks akan muncul di sini...
+Tahan gestur 1.5 detik untuk mengetik."></textarea>
+
+      <!-- Hold progress -->
+      <div class="plbl">
+        <span>Proses Tahan</span>
+        <span id="fcnt">0%</span>
+      </div>
+      <div class="ptr"><div class="pfl" id="pfl"></div></div>
+
+      <!-- Confidence -->
+      <div id="conf-display">
+        <span>CONF</span>
+        <div class="conf-bar-wrap"><div id="conf-bar"></div></div>
+        <span id="conf-pct">0%</span>
+      </div>
+
+      <!-- Buttons -->
+      <div class="brow">
+        <button class="btn" id="bspc">⎵ Spasi</button>
+        <button class="btn d" id="bclr">✕ Hapus</button>
+      </div>
+    </div>
+
+    <!-- Model Status -->
+    <div id="model-panel">
+      <div class="ptit">Status Model</div>
+      <div id="model-status" class="loading">
+        <div class="dot b"></div>
+        <span id="model-msg">Memuat model...</span>
+      </div>
+    </div>
+
+    <!-- Alphabet Grid -->
+    <div id="guides">
+      <div class="ptit">Kelas Bahasa Isyarat</div>
+      <div class="g-grid" id="alpha-grid"></div>
+    </div>
+  </aside>
+
+  <!-- Footer -->
+  <footer id="ftr">
+    <span>MediaPipe Hands · TensorFlow.js · SIBI AI Classifier · AR Canvas</span>
+    <span id="fps-display">-- FPS · CONF: --%</span>
+  </footer>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+//  CONSTANTS & CONFIG
+// ═══════════════════════════════════════════════════════════
+const CONFIDENCE_THRESHOLD = 0.75; // Min kepercayaan model untuk deteksi
+const HOLD_DURATION_MS     = 1000;  // Ms tahan gestur sebelum ketik
+const LERP_FACTOR          = 0.12;  // Kehalusan AR text (0=diam, 1=langsung)
+const MODEL_PATH           = './tfjs_model/model.json';
+const LABELS_PATH          = './labels.json';
+
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let model        = null;
+let labels       = [];
+let modelLoaded  = false;
+
+let holdChar     = '';
+let holdStart    = 0;
+let lastTyped    = 0;
+const MIN_TYPE_INTERVAL = 400; // ms antara ketikan untuk hindari duplikat
+
+// AR Lerp state
+let arX = -300, arY = -300;    // posisi AR text (layar)
+let arTargetX = -300, arTargetY = -300;
+let arLetter  = '';
+let arConf    = 0;
+let arVisible = false;
+
+// Drawing state (J & Z)
+let pointerPath = [];
+let lastGestureTime = 0;
+
+// FPS counter
+let frameCount = 0, lastFpsTime = performance.now(), fps = 0;
+
+// Canvas refs
+const webcamEl  = document.getElementById('webcam');
+const maincamEl = document.getElementById('maincam');
+const arCanvas  = document.getElementById('ar-canvas');
+const arCtx     = arCanvas.getContext('2d');
+
+// ═══════════════════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════════════════
+const $  = id => document.getElementById(id);
+
+function setDot(id, cls, lbl) {
+  $(id).className = 'dot' + (cls ? ' ' + cls : '');
+  const lid = id.replace('d', 'l');
+  if ($(lid)) $(lid).textContent = lbl;
+}
+function setGI(t) { $('gi').textContent = t; }
+
+function setLoad(pct, msg, stepActive) {
+  $('lbar').style.width = pct + '%';
+  if (msg) $('lmsg').textContent = msg;
+  if (stepActive) {
+    for (let i = 1; i <= 4; i++) {
+      const el = $('ls' + i);
+      el.className = 'l-step' + (i < stepActive ? ' done' : i === stepActive ? ' active' : '');
+    }
+  }
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ═══════════════════════════════════════════════════════════
+//  ALPHABET GRID UI
+// ═══════════════════════════════════════════════════════════
+function buildAlphaGrid(labelList) {
+  const grid = $('alpha-grid');
+  grid.innerHTML = '';
+  labelList.forEach(ch => {
+    const cell = document.createElement('div');
+    cell.className = 'g-cell';
+    cell.id = 'gc-' + ch;
+    cell.innerHTML = `<span class="g-char">${ch}</span><span class="g-scan">---</span>`;
+    grid.appendChild(cell);
+  });
+}
+
+function highlightLetter(ch, conf) {
+  document.querySelectorAll('.g-cell').forEach(el => {
+    el.classList.remove('active');
+    el.querySelector('.g-scan').textContent = '---';
+  });
+  if (ch) {
+    const cell = $('gc-' + ch);
+    if (cell) {
+      cell.classList.add('active');
+      cell.querySelector('.g-scan').textContent = (conf * 100).toFixed(0) + '%';
+      cell.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NORMALISASI LANDMARK (harus identik dengan collect_data.py)
+// ═══════════════════════════════════════════════════════════
+function normalizeLandmarks(landmarks) {
+  // landmarks: array of {x,y,z} (21 titik dari MediaPipe)
+  const wrist = landmarks[0];
+
+  // Geser ke origin
+  const shifted = landmarks.map(lm => ({
+    x: lm.x - wrist.x,
+    y: lm.y - wrist.y,
+    z: lm.z - wrist.z
+  }));
+
+  // Cari jarak max
+  let maxDist = 0;
+  for (const p of shifted) {
+    const d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+    if (d > maxDist) maxDist = d;
+  }
+  if (maxDist < 1e-6) maxDist = 1e-6;
+
+  // Flatten ke array 63 nilai
+  const result = [];
+  for (const p of shifted) {
+    result.push(p.x / maxDist, p.y / maxDist, p.z / maxDist);
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INFERENSI MODEL
+// ═══════════════════════════════════════════════════════════
+async function predictLetter(landmarks) {
+  if (!modelLoaded) return null;
+
+  const input = normalizeLandmarks(landmarks);
+  const tensor = tf.tensor2d([input]);
+
+  try {
+    const output = model.predict(tensor);
+    const probs  = await output.data();
+    tf.dispose([tensor, output]);
+
+    let maxIdx = 0;
+    for (let i = 1; i < probs.length; i++) {
+      if (probs[i] > probs[maxIdx]) maxIdx = i;
+    }
+
+    return {
+      label: labels[maxIdx],
+      confidence: probs[maxIdx],
+      allProbs: Array.from(probs)
+    };
+  } catch (e) {
+    tf.dispose(tensor);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TYPING LOGIC
+// ═══════════════════════════════════════════════════════════
+function typeCharacter(ch) {
+  const now = Date.now();
+  if (now - lastTyped < MIN_TYPE_INTERVAL) return;
+  lastTyped = now;
+
+  const ta = $('text-result');
+  if (ch === 'SPACE') {
+    ta.value += ' ';
+  } else if (ch === 'CLEAR') {
+    ta.value = '';
+  } else if (ch === 'BACKSPACE') {
+    ta.value = ta.value.slice(0, -1);
+  } else {
+    ta.value += ch;
+  }
+  ta.scrollTop = ta.scrollHeight;
+
+  // Flash effect
+  ta.style.borderColor = 'var(--accent)';
+  setTimeout(() => { ta.style.borderColor = ''; }, 300);
+
+  setDot('drec', 'ok', 'KETIK: ' + ch);
+  setTimeout(() => setDot('drec', '', 'IDLE'), 600);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AR OVERLAY RENDER
+// ═══════════════════════════════════════════════════════════
+function renderAROverlay(wristLm) {
+  // Posisi wrist di layar (canvas coords, sudah di-mirror)
+  const zone    = document.getElementById('zone');
+  const zw      = zone.clientWidth;
+  const zh      = zone.clientHeight;
+  const targetX = (1 - wristLm.x) * zw;  // Mirror X
+  const targetY = wristLm.y * zh;
+
+  arTargetX = targetX;
+  arTargetY = targetY - 80;  // Sedikit di atas pergelangan
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MEDIAPIPE RESULT HANDLER
+// ═══════════════════════════════════════════════════════════
+async function onHandResults(res) {
+  // Resize canvas jika perlu
+  const zone = document.getElementById('zone');
+  if (arCanvas.width !== zone.clientWidth || arCanvas.height !== zone.clientHeight) {
+    arCanvas.width  = zone.clientWidth;
+    arCanvas.height = zone.clientHeight;
+  }
+  arCtx.clearRect(0, 0, arCanvas.width, arCanvas.height);
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    fps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  if (!res.multiHandLandmarks || res.multiHandLandmarks.length === 0) {
+    setDot('dhand', '', 'TIDAK ADA');
+    setGI('👁 ARAHKAN TANGAN KE KAMERA');
+    holdChar = ''; holdStart = 0;
+    arVisible = false;
+    $('pfl').style.width = '0%';
+    $('fcnt').textContent = '0%';
+    $('conf-bar').style.width = '0%';
+    $('conf-pct').textContent = '0%';
+    $('fps-display').textContent = `${fps} FPS · CONF: --%`;
+    highlightLetter('', 0);
+    return;
+  }
+
+  setDot('dhand', 'ok', 'TERDETEKSI');
+  const lm = res.multiHandLandmarks[0];
+
+  // ── Gambar skeleton tangan ───────────────────────
+  drawHandSkeleton(arCtx, lm, arCanvas.width, arCanvas.height);
+
+  // ── Inferensi ────────────────────────────────────
+  let detectedChar = '';
+  let confidence   = 0;
+  let isDynamic    = false;
+
+  // 1. Prioritaskan dan cek gesture dinamis (J / Z)
+  if (isDrawingPose(lm)) {
+    pointerPath.push({ x: lm[8].x, y: lm[8].y });
+    if (pointerPath.length > 50) pointerPath.shift(); // Max 50 frame tail
+    
+    const dynPred = analyzePath(pointerPath);
+    // Debounce agar tidak ketik berulang kali per detik
+    if (dynPred && (Date.now() - lastGestureTime > 2000)) {
+       detectedChar = dynPred.label;
+       confidence   = dynPred.confidence;
+       isDynamic    = true;
+    }
+  } else {
+    // Kurangi path secara bertahap saat meleset biar trail nggak langsung lenyap
+    if (pointerPath.length > 0) pointerPath.shift(); 
+  }
+
+  // 2. Jika tidak ada J/Z, evaluasi ML Pose Statis (Fallback)
+  if (!isDynamic && modelLoaded) {
+    const pred = await predictLetter(lm);
+    if (pred && pred.confidence >= CONFIDENCE_THRESHOLD) {
+      detectedChar = pred.label;
+      confidence   = pred.confidence;
+    } else if (pred) {
+      // Confidence rendah — tampilkan tapi jangan ketik
+      detectedChar = pred.label;
+      confidence   = pred.confidence;
+    }
+  } else if (!isDynamic && !modelLoaded) {
+    // Fallback: tampilkan pesan model belum dimuat
+    setGI('⚠️ MODEL BELUM DIMUAT — Lihat panduan_lengkap.md');
+  }
+
+  // Update confidence bar
+  $('conf-bar').style.width = (confidence * 100).toFixed(0) + '%';
+  $('conf-pct').textContent = (confidence * 100).toFixed(0) + '%';
+  $('fps-display').textContent = `${fps} FPS · CONF: ${(confidence*100).toFixed(1)}%`;
+
+  // ── AR overlay ───────────────────────────────────
+  arVisible = true;
+  arLetter  = detectedChar;
+  arConf    = confidence;
+  renderAROverlay(lm[0]);
+
+  // Gambar trail memori
+  if (pointerPath.length > 1) {
+    drawTrail(arCtx, pointerPath, arCanvas.width, arCanvas.height);
+  }
+
+  // Lerp posisi
+  arX = lerp(arX, arTargetX, LERP_FACTOR);
+  arY = lerp(arY, arTargetY, LERP_FACTOR);
+
+  // Gambar teks AR di canvas
+  if (detectedChar && arVisible) {
+    drawARText(arCtx, detectedChar, confidence, arX, arY);
+  }
+
+  // ── Highlight alpabet di sidebar ─────────────────
+  if (detectedChar) {
+    highlightLetter(detectedChar, confidence);
+  }
+
+  // ── Hold logic ───────────────────────────────────
+  const isValid = detectedChar && confidence >= CONFIDENCE_THRESHOLD;
+
+  if (isValid) {
+    $('current-char-display')?.remove();
+
+    if (isDynamic) {
+        // J & Z langsung ketik (tanpa hold logic)
+        typeCharacter(detectedChar);
+        lastGestureTime = Date.now();
+        pointerPath = []; // reset trail langsung
+        holdChar = ''; holdStart = 0;
+        $('pfl').style.width = '100%';
+        $('fcnt').textContent = '100%';
+        setGI(`✨ GESTUR: ${detectedChar} DITEMUKAN`);
+        
+        setTimeout(() => {
+            $('pfl').style.width = '0%';
+            $('fcnt').textContent = '0%';
+        }, 500);
+    } 
+    else if (detectedChar === holdChar) {
+      const elapsed = Date.now() - holdStart;
+      const pct = Math.min(100, (elapsed / HOLD_DURATION_MS) * 100);
+      $('pfl').style.width = pct + '%';
+      $('fcnt').textContent = pct.toFixed(0) + '%';
+
+      setGI(`📝 DETEKSI: ${detectedChar} [${(confidence*100).toFixed(0)}%] — Tahan ${((HOLD_DURATION_MS - elapsed)/1000).toFixed(1)}s`);
+      setDot('drec', 'warn', 'MEMBACA...');
+
+      if (elapsed >= HOLD_DURATION_MS) {
+        typeCharacter(detectedChar);
+        holdChar  = '';
+        holdStart = 0;
+        $('pfl').style.width = '0%';
+        $('fcnt').textContent = '0%';
+      }
+    } else {
+      holdChar  = detectedChar;
+      holdStart = Date.now();
+      $('pfl').style.width = '0%';
+      $('fcnt').textContent = '0%';
+      setGI(`✋ DETEKSI: ${detectedChar} [${(confidence*100).toFixed(0)}%] — Tahan untuk mengetik`);
+    }
+  } else {
+    holdChar  = '';
+    holdStart = 0;
+    $('pfl').style.width = '0%';
+    $('fcnt').textContent = '0%';
+    if (detectedChar) {
+      setGI(`🔍 ${detectedChar} [${(confidence*100).toFixed(0)}%] — Conf terlalu rendah (<${(CONFIDENCE_THRESHOLD*100).toFixed(0)}%)`);
+    } else if (modelLoaded) {
+      setGI('🤔 GESTUR TIDAK DIKENALI');
+    }
+    setDot('drec', '', 'IDLE');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DRAWING FUNCTIONS
+// ═══════════════════════════════════════════════════════════
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],       // Jempol
+  [0,5],[5,6],[6,7],[7,8],       // Telunjuk
+  [5,9],[9,10],[10,11],[11,12],  // Tengah
+  [9,13],[13,14],[14,15],[15,16],// Manis
+  [13,17],[17,18],[18,19],[19,20],// Kelingking
+  [0,17]                          // Telapak
+];
+const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
+
+function drawHandSkeleton(ctx, lm, w, h) {
+  ctx.save();
+
+  // Connection lines
+  ctx.lineWidth = 2.5;
+  CONNECTIONS.forEach(([a, b]) => {
+    const ax = (1 - lm[a].x) * w, ay = lm[a].y * h;
+    const bx = (1 - lm[b].x) * w, by = lm[b].y * h;
+
+    // Gradient-ish berwarna
+    const grad = ctx.createLinearGradient(ax, ay, bx, by);
+    grad.addColorStop(0, 'rgba(0, 230, 118, 0.6)');
+    grad.addColorStop(1, 'rgba(0, 176, 255, 0.6)');
+    ctx.strokeStyle = grad;
+
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  });
+
+  // Landmark dots
+  lm.forEach((pt, i) => {
+    const x = (1 - pt.x) * w, y = pt.y * h;
+    const isTip = FINGERTIPS.has(i);
+    ctx.beginPath();
+    ctx.arc(x, y, isTip ? 7 : 3.5, 0, Math.PI * 2);
+    if (isTip) {
+      ctx.fillStyle = '#00b0ff';
+      ctx.shadowColor = 'rgba(0,176,255,0.8)';
+      ctx.shadowBlur = 10;
+    } else {
+      ctx.fillStyle = 'rgba(0, 230, 118, 0.9)';
+      ctx.shadowColor = 'rgba(0,230,118,0.6)';
+      ctx.shadowBlur = 6;
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+
+  ctx.restore();
+}
+
+function drawARText(ctx, letter, conf, x, y) {
+  ctx.save();
+
+  // Glow background halo
+  const radius = 55;
+  const grd = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  grd.addColorStop(0, 'rgba(0, 230, 118, 0.18)');
+  grd.addColorStop(1, 'rgba(0, 230, 118, 0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Letter
+  ctx.font = 'bold 72px Syne, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Shadow layers for neon effect
+  ctx.shadowColor = 'rgba(0, 230, 118, 0.9)';
+  ctx.shadowBlur  = 30;
+  ctx.fillStyle   = '#ffffff';
+  ctx.fillText(letter, x, y);
+
+  ctx.shadowBlur  = 60;
+  ctx.fillStyle   = 'rgba(0, 230, 118, 0.6)';
+  ctx.fillText(letter, x, y);
+
+  // Confidence label below
+  ctx.shadowBlur  = 0;
+  ctx.font        = '11px Space Mono, monospace';
+  ctx.fillStyle   = conf >= CONFIDENCE_THRESHOLD
+    ? 'rgba(0, 230, 118, 0.9)'
+    : 'rgba(255, 109, 0, 0.9)';
+  ctx.fillText((conf * 100).toFixed(0) + '%', x, y + 46);
+
+  ctx.restore();
+}
+
+function isDrawingPose(lm) {
+  // Hanya telunjuk yang lurus (mengepal ketat)
+  const indexUp = lm[8].y < lm[6].y && lm[8].y < lm[7].y;
+  
+  // Tengah, Manis, Kelingking tertekuk
+  const middleFolded = lm[12].y > lm[9].y;
+  const ringFolded   = lm[16].y > lm[13].y;
+  const pinkyFolded  = lm[20].y > lm[17].y;
+  
+  // Jempol tertekuk ke dalam telapak (x jempol tip berada relatif di dalam rentang sendi MCP)
+  const minX = Math.min(lm[5].x, lm[17].x) - 0.05;
+  const maxX = Math.max(lm[5].x, lm[17].x) + 0.05;
+  const thumbFolded = lm[4].x >= minX && lm[4].x <= maxX;
+  
+  return indexUp && middleFolded && ringFolded && pinkyFolded && thumbFolded;
+}
+
+function drawTrail(ctx, path, w, h) {
+  if (path.length < 2) return;
+  ctx.save();
+  
+  // Gaya 1: Halo menyala
+  ctx.beginPath();
+  ctx.moveTo((1 - path[0].x) * w, path[0].y * h);
+  for (let i = 1; i < path.length; i++) {
+    ctx.lineTo((1 - path[i].x) * w, path[i].y * h);
+  }
+  ctx.lineWidth = 14;
+  ctx.strokeStyle = 'rgba(255, 64, 129, 0.3)'; 
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  
+  // Gaya 2: Inti jejak
+  ctx.beginPath();
+  ctx.moveTo((1 - path[0].x) * w, path[0].y * h);
+  for (let i = 1; i < path.length; i++) {
+    ctx.lineTo((1 - path[i].x) * w, path[i].y * h);
+  }
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#ff4081';
+  ctx.shadowColor = '#ff4081';
+  ctx.shadowBlur = 12;
+  ctx.stroke();
+  
+  ctx.restore();
+}
+
+function analyzePath(path) {
+  if (path.length < 15) return null;
+  let minX=1, maxX=0, minY=1, maxY=0;
+  for(let p of path) {
+    if(p.x < minX) minX = p.x;
+    if(p.x > maxX) maxX = p.x;
+    if(p.y < minY) minY = p.y;
+    if(p.y > maxY) maxY = p.y;
+  }
+  const w = maxX - minX;
+  const h = maxY - minY;
+  if (w < 0.08 && h < 0.08) return null; // Terlalu kecil, abaikan (mungkin itu pose 'D')
+
+  // Normalisasi koordinat ke screen X dan Y (mirrored)
+  const scPath = path.map(p => ({ x: 1 - p.x, y: p.y }));
+  const start = scPath[0], end = scPath[scPath.length - 1];
+  
+  let lowest = start, lowestIdx = 0;
+  for(let i=0; i<scPath.length; i++){
+     if(scPath[i].y > lowest.y) { lowest = scPath[i]; lowestIdx = i; }
+  }
+  
+  // ── DETEKSI J
+  // Pola J: Mulai atas, lurus turun, pas di bawah melengkung gantung ke KIRI ATAS.
+  if (h > w * 1.3 && lowestIdx > scPath.length * 0.4) {
+     if (end.y < lowest.y - h*0.15 && end.x < lowest.x - w*0.1) {
+         return { label: 'J', confidence: 0.95 };
+     }
+  }
+  
+  // ── DETEKSI Z
+  // Pola Z: 3 segmen besar arah X lalu X terbalik lalu X
+  const third = Math.floor(scPath.length / 3);
+  const p1 = scPath[third], p2 = scPath[third*2];
+  const s1dx = p1.x - start.x, s1dy = p1.y - start.y;
+  const s2dx = p2.x - p1.x,    s2dy = p2.y - p1.y;
+  const s3dx = end.x - p2.x,   s3dy = end.y - p2.y;
+  
+  // s1: Kanan mendominasi, s2: Kiri Bawah, s3: Kanan
+  if (s1dx > w*0.3 && Math.abs(s1dy) < h*0.5 &&
+      s2dx < -w*0.3 && s2dy > h*0.2 &&
+      s3dx > w*0.3 && Math.abs(s3dy) < h*0.5) {
+      return { label: 'Z', confidence: 0.95 };
+  }
+  
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MODEL LOADING
+// ═══════════════════════════════════════════════════════════
+async function loadModel() {
+  const statusEl = $('model-status');
+  const msgEl    = $('model-msg');
+
+  try {
+    // Load labels
+    const labResp = await fetch(LABELS_PATH);
+    if (!labResp.ok) throw new Error('labels.json tidak ditemukan');
+    const labData = await labResp.json();
+    labels = labData.labels; // Biarkan label urutan ML murni (0-23 tidak ada J dan Z)
+    
+    // Gabungkan dengan J dan Z untuk tampilan visual alfabet
+    const fullLabels = [...labels, 'J', 'Z'].sort();
+    buildAlphaGrid(fullLabels);
+
+    // Load TF.js model
+    model      = await tf.loadLayersModel(MODEL_PATH);
+    modelLoaded = true;
+
+    statusEl.className = 'loaded';
+    msgEl.textContent  = `✅ Model dimuat · ${labels.length} kelas (${labels.join(', ')})`;
+    setDot('dmodel', 'ok', 'AI AKTIF');
+
+    return true;
+  } catch (err) {
+    console.warn('Model tidak tersedia:', err.message);
+    statusEl.className = 'error';
+    msgEl.textContent  = `⚠️ Model belum ada — Jalankan collect_data.py lalu train_model.py`;
+    setDot('dmodel', 'err', 'NO MODEL');
+
+    // Tampilkan alfabet default SIBI (tanpa model)
+    const defaultLabels = ['A','B','C','D','E','F','G','H','I','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y'];
+    labels = defaultLabels;
+    const fallbackLabels = [...defaultLabels, 'J', 'Z'].sort();
+    buildAlphaGrid(fallbackLabels);
+
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MEDIAPIPE & CAMERA SETUP
+// ═══════════════════════════════════════════════════════════
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    webcamEl.srcObject  = stream;
+    maincamEl.srcObject = stream;
+    await webcamEl.play();
+    setDot('dcam', 'ok', 'KAMERA AKTIF');
+    return true;
+  } catch (e) {
+    setDot('dcam', 'err', 'KAMERA ERROR');
+    console.error('Camera error:', e);
+    return false;
+  }
+}
+
+function startMediaPipe() {
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({
+    maxNumHands         : 1,
+    modelComplexity     : 1,   // 0=lite, 1=full (lebih akurat)
+    minDetectionConfidence: 0.55,
+    minTrackingConfidence : 0.45,
+  });
+  hands.onResults(onHandResults);
+
+  new Camera(webcamEl, {
+    onFrame : async () => await hands.send({ image: webcamEl }),
+    width   : 640,
+    height  : 480,
+  }).start();
+}
+
+// Resize AR canvas on window resize
+window.addEventListener('resize', () => {
+  const zone   = document.getElementById('zone');
+  arCanvas.width  = zone.clientWidth;
+  arCanvas.height = zone.clientHeight;
+});
+
+// ═══════════════════════════════════════════════════════════
+//  BUTTON HANDLERS
+// ═══════════════════════════════════════════════════════════
+$('bspc').addEventListener('click', () => typeCharacter('SPACE'));
+$('bclr').addEventListener('click', () => typeCharacter('CLEAR'));
+
+// ═══════════════════════════════════════════════════════════
+//  BOOT SEQUENCE
+// ═══════════════════════════════════════════════════════════
+async function init() {
+  setLoad(10, 'Memuat MediaPipe...', 1);
+  await new Promise(r => setTimeout(r, 300));
+
+  setLoad(30, 'Mengakses kamera...', 2);
+  const camOK = await startCamera();
+
+  setLoad(55, 'Memuat model AI...', 3);
+  const modelOK = await loadModel();
+
+  setLoad(80, 'Menginisialisasi AR...', 4);
+  startMediaPipe();
+  await new Promise(r => setTimeout(r, 400));
+
+  setLoad(100, modelOK
+    ? '✅ Semua sistem aktif!'
+    : '⚠️ Mode terbatas: Model AI belum dimuat'
+  , 4);
+
+  $('ls4').className = 'l-step done';
+  await new Promise(r => setTimeout(r, 800));
+  $('load').classList.add('hidden');
+
+  if (modelOK) {
+    setGI('✅ AI AKTIF — Arahkan tangan ke kamera');
+  } else {
+    setGI('⚠️ MODEL BELUM ADA — Lihat panduan_lengkap.md');
+  }
+}
+
+init().catch(console.error);
+</script>
+</body>
+</html>
